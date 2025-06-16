@@ -4,9 +4,9 @@ Overview
 A project to analyze and compare the performance of Strassen’s algorithm for matrix multiplication against standard matrix multiplication techniques.
 
 Features
-Implementation of Strassen’s algorithm for matrix multiplication.
-Comparison with naive (standard) matrix multiplication.
-Performance benchmarks and analysis.
+- Implementation of Strassen’s algorithm for matrix multiplication.
+- Comparison with naive (standard) matrix multiplication.
+- Performance benchmarks and analysis.
 
 
 ## Tags
