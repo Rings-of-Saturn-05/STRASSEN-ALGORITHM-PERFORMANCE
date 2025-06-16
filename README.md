@@ -8,10 +8,6 @@ Implementation of Strassen’s algorithm for matrix multiplication.
 Comparison with naive (standard) matrix multiplication.
 Performance benchmarks and analysis.
 
-Results
-(Summarize your findings or link to benchmark results/plots.)
-(You can include example tables or images here.)
-
 
 ## Tags
 
