@@ -170,15 +170,89 @@ def create_crossover_analysis(df):
     ax.scatter(df['Size'], df['Naive_Time'], s=60, color='#FF6B6B', zorder=5, alpha=0.8)
     ax.scatter(df['Size'], df['Strassen_Time'], s=60, color='#4ECDC4', zorder=5, alpha=0.8)
     
-    # Find crossover point
-    crossover_idx = np.argmin(np.abs(naive_interp - strassen_interp))
-    crossover_size = sizes_interp[crossover_idx]
-    crossover_time = naive_interp[crossover_idx]
+    # Find crossover point using both methods
+    # Method 1: First point where Strassen becomes faster (discrete)
+    crossover_candidates = df[df['Speedup'] >= 1.0]
+    discrete_crossover = None
+    if len(crossover_candidates) > 0:
+        discrete_crossover = crossover_candidates.iloc[0]['Size']
     
-    # Mark crossover point
-    ax.plot(crossover_size, crossover_time, 'ro', markersize=12, 
-            label=f'Crossover Point (~{crossover_size:.0f}×{crossover_size:.0f})')
-    ax.axvline(x=crossover_size, color='red', linestyle='--', alpha=0.5)
+    # Method 2: Interpolated crossover point (but only look after speedup > 0.8)
+    # Find where curves actually cross, not just where they're closest
+    valid_mask = (sizes_interp >= df['Size'].min()) & (strassen_interp < naive_interp)
+    if np.any(valid_mask):
+        # Find the last point where Strassen is slower, then the crossover is just after
+        last_slower_idx = np.where(strassen_interp >= naive_interp)[0]
+        first_faster_idx = np.where(strassen_interp < naive_interp)[0]
+        
+        if len(last_slower_idx) > 0 and len(first_faster_idx) > 0:
+            # Find the transition point
+            transition_indices = []
+            for i in range(len(sizes_interp)-1):
+                if (strassen_interp[i] >= naive_interp[i] and 
+                    strassen_interp[i+1] < naive_interp[i+1]):
+                    transition_indices.append(i)
+            
+            if transition_indices:
+                crossover_idx = transition_indices[0]
+                interpolated_crossover = sizes_interp[crossover_idx]
+                crossover_time = (naive_interp[crossover_idx] + strassen_interp[crossover_idx]) / 2
+            else:
+                # Fallback to discrete method
+                interpolated_crossover = discrete_crossover
+                if discrete_crossover:
+                    crossover_time = df[df['Size'] == discrete_crossover]['Naive_Time'].iloc[0]
+                else:
+                    crossover_time = 0
+        else:
+            interpolated_crossover = discrete_crossover
+            if discrete_crossover:
+                crossover_time = df[df['Size'] == discrete_crossover]['Naive_Time'].iloc[0]
+            else:
+                crossover_time = 0
+    else:
+        interpolated_crossover = discrete_crossover
+        if discrete_crossover:
+            crossover_time = df[df['Size'] == discrete_crossover]['Naive_Time'].iloc[0]
+        else:
+            crossover_time = 0
+    
+    # Use the more reliable estimate
+    if discrete_crossover and interpolated_crossover:
+        if abs(discrete_crossover - interpolated_crossover) < discrete_crossover * 0.5:
+            # If they're close, use interpolated
+            crossover_size = interpolated_crossover
+        else:
+            # If they're far apart, trust the discrete method more
+            crossover_size = discrete_crossover
+            crossover_time = df[df['Size'] == discrete_crossover]['Naive_Time'].iloc[0]
+    elif discrete_crossover:
+        crossover_size = discrete_crossover
+        crossover_time = df[df['Size'] == discrete_crossover]['Naive_Time'].iloc[0]
+    else:
+        # No crossover found
+        crossover_size = None
+        crossover_time = None
+    
+    # Mark crossover point if found
+    if crossover_size:
+        ax.plot(crossover_size, crossover_time, 'ro', markersize=12, 
+                label=f'Crossover Point (~{crossover_size:.0f}×{crossover_size:.0f})')
+        ax.axvline(x=crossover_size, color='red', linestyle='--', alpha=0.5)
+        
+        # Add annotations
+        ax.annotate(f'Crossover at ~{crossover_size:.0f}×{crossover_size:.0f}\nTime: {crossover_time:.4f}s\nSpeedup ≥ 1.0x',
+                    xy=(crossover_size, crossover_time),
+                    xytext=(crossover_size + (df['Size'].max() - df['Size'].min()) * 0.1, 
+                           crossover_time + crossover_time*0.5),
+                    arrowprops=dict(arrowstyle='->', color='red', lw=2),
+                    fontsize=11, ha='center',
+                    bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7))
+    else:
+        # Add text indicating no crossover found
+        ax.text(0.7, 0.7, 'No crossover point found\nin tested range', 
+                transform=ax.transAxes, fontsize=12,
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="orange", alpha=0.7))
     
     ax.set_xlabel('Matrix Size (n×n)')
     ax.set_ylabel('Execution Time (seconds)')
@@ -186,13 +260,7 @@ def create_crossover_analysis(df):
     ax.legend(fontsize=12)
     ax.grid(True, alpha=0.3)
     
-    # Add annotations
-    ax.annotate(f'Crossover at ~{crossover_size:.0f}×{crossover_size:.0f}\nTime: {crossover_time:.3f}s',
-                xy=(crossover_size, crossover_time),
-                xytext=(crossover_size + 50, crossover_time + crossover_time*0.5),
-                arrowprops=dict(arrowstyle='->', color='red', lw=2),
-                fontsize=11, ha='center',
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="yellow", alpha=0.7))
+    return fig
     
     return fig
 
@@ -270,28 +338,28 @@ def main():
     print("\n🎨 Generating visualizations...")
     
     # Create visualizations
-    fig1 = create_performance_comparison(df)
-    fig1.suptitle('Strassen vs Naive: Performance Comparison', fontsize=16, y=1.02)
+    # fig1 = create_performance_comparison(df)
+    # fig1.suptitle('Strassen vs Naive: Performance Comparison', fontsize=16, y=1.02)
     
-    fig2 = create_complexity_analysis(df)
-    fig2.suptitle('Algorithmic Complexity Analysis', fontsize=16, y=1.02)
+    # fig2 = create_complexity_analysis(df)
+    # fig2.suptitle('Algorithmic Complexity Analysis', fontsize=16, y=1.02)
     
     fig3 = create_crossover_analysis(df)
     
-    fig4 = create_memory_complexity_info()
+    # fig4 = create_memory_complexity_info()
     
     # Save plots
     try:
-        fig1.savefig('strassen_performance_comparison.png', dpi=300, bbox_inches='tight')
-        fig2.savefig('strassen_complexity_analysis.png', dpi=300, bbox_inches='tight')
+        # fig1.savefig('strassen_performance_comparison.png', dpi=300, bbox_inches='tight')
+        # fig2.savefig('strassen_complexity_analysis.png', dpi=300, bbox_inches='tight')
         fig3.savefig('strassen_crossover_analysis.png', dpi=300, bbox_inches='tight')
-        fig4.savefig('strassen_memory_analysis.png', dpi=300, bbox_inches='tight')
+        # fig4.savefig('strassen_memory_analysis.png', dpi=300, bbox_inches='tight')
         
         print("\n✅ Visualizations saved:")
-        print("   • strassen_performance_comparison.png")
-        print("   • strassen_complexity_analysis.png") 
+        # print("   • strassen_performance_comparison.png")
+        # print("   • strassen_complexity_analysis.png") 
         print("   • strassen_crossover_analysis.png")
-        print("   • strassen_memory_analysis.png")
+        # print("   • strassen_memory_analysis.png")
         
     except Exception as e:
         print(f"\n❌ Error saving plots: {e}")

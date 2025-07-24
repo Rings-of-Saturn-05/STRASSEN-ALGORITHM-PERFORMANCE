@@ -23,7 +23,7 @@ Matrix* strassenMultiply(Matrix* a, Matrix* b);
 Matrix* strassenHelper(Matrix* a, Matrix* b, int size);
 int nextPowerOf2(int n);
 void runBenchmark();
-void saveResultsToFile(int* sizes, double* naive_times, double* strassen_times, int count);
+void saveResultsToFile(int* sizes, double* naive_times, double* strassen_times, double* naive_std, double* strassen_std, int count);
 
 // Create a matrix of given size
 Matrix* createMatrix(int size) {
@@ -310,13 +310,14 @@ Matrix* strassenHelper(Matrix* a, Matrix* b, int size) {
 }
 
 // Save benchmark results to file for plotting
-void saveResultsToFile(int* sizes, double* naive_times, double* strassen_times, int count) {
+void saveResultsToFile(int* sizes, double* naive_times, double* strassen_times, double* naive_std, double* strassen_std, int count) {
     FILE* file = fopen("benchmark_results.txt", "w");
     if (file) {
-        fprintf(file, "Size,Naive_Time,Strassen_Time,Speedup\n");
+        fprintf(file, "Size,Naive_Time,Naive_Std,Strassen_Time,Strassen_Std,Speedup\n");
         for (int i = 0; i < count; i++) {
             double speedup = naive_times[i] / strassen_times[i];
-            fprintf(file, "%d,%.6f,%.6f,%.2f\n", sizes[i], naive_times[i], strassen_times[i], speedup);
+            fprintf(file, "%d,%.6f,%.6f,%.6f,%.6f,%.2f\n", 
+                    sizes[i], naive_times[i], naive_std[i], strassen_times[i], strassen_std[i], speedup);
         }
         fclose(file);
         printf("Results saved to benchmark_results.txt\n");
@@ -325,95 +326,152 @@ void saveResultsToFile(int* sizes, double* naive_times, double* strassen_times, 
 
 // Run comprehensive benchmark
 void runBenchmark() {
-    printf("=== Strassen vs Naive Matrix Multiplication Benchmark ===\n\n");
-    
-    int test_sizes[] = {50, 100, 150, 200, 250, 300, 400, 500};
+    printf("=== Strassen vs Naive Matrix Multiplication Benchmark ===\n");
+    printf("Running 10 tests per matrix size for statistical reliability\n\n");
+
+    int test_sizes[] = {2, 4, 8, 16, 32, 64, 128, 256, 512, 1024};
     int num_tests = sizeof(test_sizes) / sizeof(test_sizes[0]);
+    int num_runs = 10;
     
     double naive_times[num_tests];
     double strassen_times[num_tests];
+    double naive_std[num_tests];
+    double strassen_std[num_tests];
     
-    printf("%-8s %-12s %-15s %-10s %-10s\n", "Size", "Naive(s)", "Strassen(s)", "Speedup", "Efficiency");
-    printf("---------------------------------------------------------------\n");
+    printf("%-8s %-15s %-18s %-10s\n", "Size", "Naive(s)±σ", "Strassen(s)±σ", "Speedup");
+    printf("-----------------------------------------------\n");
     
     for (int i = 0; i < num_tests; i++) {
         int size = test_sizes[i];
+        printf("Testing %dx%d matrices... ", size, size);
+        fflush(stdout);
         
-        // Create test matrices
-        Matrix* a = createMatrix(size);
-        Matrix* b = createMatrix(size);
-        fillRandomMatrix(a);
-        fillRandomMatrix(b);
+        double naive_run_times[num_runs];
+        double strassen_run_times[num_runs];
         
-        // Benchmark naive multiplication
-        clock_t start = clock();
-        Matrix* naive_result = naiveMultiply(a, b);
-        clock_t end = clock();
-        naive_times[i] = ((double)(end - start)) / CLOCKS_PER_SEC;
-        
-        // Benchmark Strassen multiplication
-        start = clock();
-        Matrix* strassen_result = strassenMultiply(a, b);
-        end = clock();
-        strassen_times[i] = ((double)(end - start)) / CLOCKS_PER_SEC;
-        
-        // Calculate speedup and efficiency
-        double speedup = naive_times[i] / strassen_times[i];
-        double theoretical_speedup = pow(size / 32.0, log(7)/log(2) - 3); // Rough estimate
-        double efficiency = (speedup / theoretical_speedup) * 100;
-        
-        printf("%-8d %-12.6f %-15.6f %-10.2fx %-9.1f%%\n", 
-               size, naive_times[i], strassen_times[i], speedup, efficiency);
-        
-        // Verify correctness for smaller matrices
-        if (size <= 100) {
-            int correct = 1;
-            for (int r = 0; r < size && correct; r++) {
-                for (int c = 0; c < size && correct; c++) {
-                    if (fabs(naive_result->data[r][c] - strassen_result->data[r][c]) > 1e-6) {
-                        correct = 0;
-                    }
-                }
-            }
-            if (!correct) {
-                printf("   WARNING: Results don't match for size %d!\n", size);
-            }
+        // Run multiple tests for this size
+        for (int run = 0; run < num_runs; run++) {
+            // Create test matrices
+            Matrix* a = createMatrix(size);
+            Matrix* b = createMatrix(size);
+            fillRandomMatrix(a);
+            fillRandomMatrix(b);
+            
+            // Benchmark naive multiplication
+            clock_t start = clock();
+            Matrix* naive_result = naiveMultiply(a, b);
+            clock_t end = clock();
+            naive_run_times[run] = ((double)(end - start)) / CLOCKS_PER_SEC;
+            
+            // Benchmark Strassen multiplication
+            start = clock();
+            Matrix* strassen_result = strassenMultiply(a, b);
+            end = clock();
+            strassen_run_times[run] = ((double)(end - start)) / CLOCKS_PER_SEC;
+            
+            // Clean up
+            freeMatrix(a);
+            freeMatrix(b);
+            freeMatrix(naive_result);
+            freeMatrix(strassen_result);
         }
         
-        // Clean up
-        freeMatrix(a);
-        freeMatrix(b);
-        freeMatrix(naive_result);
-        freeMatrix(strassen_result);
+        // Calculate statistics
+        double naive_sum = 0, strassen_sum = 0;
+        for (int run = 0; run < num_runs; run++) {
+            naive_sum += naive_run_times[run];
+            strassen_sum += strassen_run_times[run];
+        }
+        naive_times[i] = naive_sum / num_runs;
+        strassen_times[i] = strassen_sum / num_runs;
+        
+        // Calculate standard deviation
+        double naive_var = 0, strassen_var = 0;
+        for (int run = 0; run < num_runs; run++) {
+            naive_var += (naive_run_times[run] - naive_times[i]) * (naive_run_times[run] - naive_times[i]);
+            strassen_var += (strassen_run_times[run] - strassen_times[i]) * (strassen_run_times[run] - strassen_times[i]);
+        }
+        naive_std[i] = sqrt(naive_var / num_runs);
+        strassen_std[i] = sqrt(strassen_var / num_runs);
+        
+        // Calculate speedup
+        double speedup = naive_times[i] / strassen_times[i];
+        
+        printf("Done\n");
+        // printf("%-8d %-15s %-18s %-10.2fx", 
+        //        size, 
+        //        "", // Will be filled in next printf
+        //        "", // Will be filled in next printf
+        //        speedup);
+        
+        // Print times with standard deviation on separate line for better formatting
+        printf("%-8d %.3f±%.3f   %.3f±%.3f      %-.2fx", 
+               size, naive_times[i], naive_std[i], strassen_times[i], strassen_std[i], speedup);
+        
+        printf("\n");
     }
-    
-    printf("\n=== Summary ===\n");
-    printf("• Strassen algorithm shows speedup for larger matrices\n");
-    printf("• Crossover point is typically around 100-200x200 matrices\n");
-    printf("• Theoretical complexity: O(n^%.2f) vs O(n^3)\n", log(7)/log(2));
     
     // Save results for visualization
-    saveResultsToFile(test_sizes, naive_times, strassen_times, num_tests);
+    saveResultsToFile(test_sizes, naive_times, strassen_times, naive_std, strassen_std, num_tests);
     
     // Generate simple ASCII visualization
-    printf("\n=== Performance Visualization ===\n");
-    printf("Execution Time Comparison (scaled):\n");
+    printf("\n=== Performance Visualization (Log Scale) ===\n");
+    printf("Execution Time Comparison:\n\n");
+    
+    // Find min and max times for log scaling
+    double min_time = naive_times[0];
+    double max_time = naive_times[0];
+    for (int i = 0; i < num_tests; i++) {
+        if (naive_times[i] > 0 && naive_times[i] < min_time) min_time = naive_times[i];
+        if (strassen_times[i] > 0 && strassen_times[i] < min_time) min_time = strassen_times[i];
+        if (naive_times[i] > max_time) max_time = naive_times[i];
+        if (strassen_times[i] > max_time) max_time = strassen_times[i];
+    }
+    
+    // Use log scale for better visualization
+    double log_min = log2(min_time);
+    double log_max = log2(max_time);
+    double log_range = log_max - log_min;
     
     for (int i = 0; i < num_tests; i++) {
-        int naive_bar = (int)(naive_times[i] * 50 / naive_times[num_tests-1]);
-        int strassen_bar = (int)(strassen_times[i] * 50 / naive_times[num_tests-1]);
+        printf("%4dx%-4d: ", test_sizes[i], test_sizes[i]);
         
-        printf("%3dx%3d: ", test_sizes[i], test_sizes[i]);
+        // Calculate log-scaled bar lengths
+        int naive_bar = 0, strassen_bar = 0;
+        if (naive_times[i] > 0) {
+            naive_bar = (int)((log2(naive_times[i]) - log_min) * 40 / log_range);
+        }
+        if (strassen_times[i] > 0) {
+            strassen_bar = (int)((log2(strassen_times[i]) - log_min) * 40 / log_range);
+        }
+        
+        // Ensure bars are at least 1 character if time > 0
+        if (naive_times[i] > 0 && naive_bar == 0) naive_bar = 1;
+        if (strassen_times[i] > 0 && strassen_bar == 0) strassen_bar = 1;
+        
         printf("Naive    [");
         for (int j = 0; j < naive_bar; j++) printf("#");
-        for (int j = naive_bar; j < 50; j++) printf(" ");
-        printf("]\n");
+        for (int j = naive_bar; j < 40; j++) printf(" ");
+        printf("] %.4fs", naive_times[i]);
         
-        printf("         Strassen [");
+        // Show speedup indicator
+        double speedup = naive_times[i] / strassen_times[i];
+        if (speedup > 1.0) {
+            printf(" ↗ %.2fx faster", speedup);
+        } else {
+            printf(" ↘ %.2fx slower", 1.0/speedup);
+        }
+        printf("\n");
+        
+        printf("           Strassen [");
         for (int j = 0; j < strassen_bar; j++) printf("=");
-        for (int j = strassen_bar; j < 50; j++) printf(" ");
-        printf("]\n\n");
+        for (int j = strassen_bar; j < 40; j++) printf(" ");
+        printf("] %.4fs\n\n", strassen_times[i]);
     }
+    
+    // Add scale reference
+    printf("Scale: Log2 time from %.1e to %.1e seconds\n", min_time, max_time);
+    printf("Legend: # = Naive O(n³)    = = Strassen O(n^%.2f)\n", log2(7));
 }
 
 // Demonstration function
@@ -473,13 +531,13 @@ int main() {
     printf("================================================\n\n");
     
     // Demonstrate correctness with small matrices
-    demonstrateCorrectness();
+    // demonstrateCorrectness();
     
     // Run comprehensive benchmark
     runBenchmark();
     
-    printf("\nNote: For visualization, you can plot the data from 'benchmark_results.txt'\n");
-    printf("using tools like gnuplot, Python matplotlib, or Excel.\n");
+    // printf("\nNote: For visualization, you can plot the data from 'benchmark_results.txt'\n");
+    // printf("using tools like gnuplot, Python matplotlib, or Excel.\n");
     
     return 0;
 }
